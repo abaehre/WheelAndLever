@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<!--
+wheelAndLever.html
+-->
+
+<html>
+  <body>
+    <canvas id="canvas" style="background-color: #111111"></canvas>
+    <!-- <script src="pipe.js"></script> -->
+    <script>
+    // the context used to draw things on the canvas
+    var context;
+    var objs;
+    var scale = 3;
+    var north = 0;
+    var south = 180;
+    var east = 90;
+    var west = 270;
+    var wheelAngles = [east, south, west];
+    var cancels = [-1, -1, -1];
+    var emitters = [];
+    var arrows = [];
+
+
+    function makeParticle() {
+      function constructor() {
+        var gaussian = function(mean, stdev) {
+              var y2;
+              var use_last = false;
+              return function() {
+                  var y1;
+                  if(use_last) {
+                    y1 = y2;
+                    use_last = false;
+                  }
+                  else {
+                      var x1, x2, w;
+                      do {
+                          x1 = 2.0 * Math.random() - 1.0;
+                          x2 = 2.0 * Math.random() - 1.0;
+                          w  = x1 * x1 + x2 * x2;
+                      } while( w >= 1.0);
+                      w = Math.sqrt((-2.0 * Math.log(w))/w);
+                      y1 = x1 * w;
+                      y2 = x2 * w;
+                      use_last = true;
+                }
+
+                var retval = mean + stdev * y1;
+                if(retval > 0) {
+                    return retval;
+                }
+                return -retval;
+            }
+          };
+          var standard = gaussian(0, 1);
+          var xStandard = gaussian(0, 15);
+          var yStandard = gaussian(0, 5)
+          this["x"] = arguments[0] + xStandard();
+          this["y"] = arguments[1] + yStandard();
+          this["life"] = arguments[2];
+          this["color"] = arguments[3];
+          this["toRemove"] = false;
+          // original -1 and -2
+          this["xa"] = standard() - 1.0;
+          this["ya"] = standard() - 5.0;
+          this["za"] = 0;
+          // original 2.0
+          //this["z"] = Math.random() + 2.0;
+          this["z"] = 0.0;
+          //randomize how much life each particle in the emitter actually has
+          this["originalLife"] = arguments[2] + Math.random() * 15 - 10;
+          this["tempLife"] = 0;
+          this["time"] = 0;
+          // radius of the particle. tinker with number
+          this["radius"] = 3;
+
+      }
+      return constructor;
+    }
+
+    var Particle = makeParticle();
+
+    function makeEmitter() {
+      function constructor() {
+        this["x"] = arguments[0];
+        this["y"] = arguments[1];
+        var colors = ["#fdcf58", "#f27d0c", "#800909", "#f07f13"];
+        var particles = [];
+        for (var j = 0; j < 30; j++) {
+          particles.push(new Particle(arguments[0], arguments[1], 20, colors[Math.floor(Math.random() * colors.length)]));
+        }
+
+        this["particles"] = particles;
+
+      }
+      return constructor;
+    }
+
+    var Emitter = makeEmitter();
+    var images = {};
+
+    function makeWheel() {
+      function constructor() {
+        this["id"] = arguments[0];
+        this["angle"] = arguments[1];
+        this["x"] = arguments[2];
+        this["y"] = arguments[3];
+        this["rotate"] = arguments[4];
+        this["image"] = arguments[5];
+      }
+      return constructor;
+    }
+
+    var Wheel = makeWheel()
+
+    function makeArrow() {
+      function constructor() {
+        this["id"] = arguments[0];
+        this["x"] = arguments[1];
+        this["y"] = arguments[2];
+        this["image"] = arguments[3];
+      }
+      return constructor;
+    }
+
+    var Arrow = makeArrow()
+
+    function makeLever() {
+      function constructor() {
+        this["id"] = arguments[0];
+        this["down"] = arguments[1];
+        this["x"] = arguments[2];
+        this["y"] = arguments[3];
+        this["image"] = arguments[4];
+      }
+      return constructor;
+    }
+
+    var Lever = makeLever()
+
+    function makePlatform() {
+      function constructor() {
+        this["id"] = arguments[0];
+        this["x"] = arguments[1];
+        this["y"] = arguments[2];
+        this["image"] = arguments[3];
+      }
+      return constructor;
+    }
+
+    var Platform = makePlatform()
+
+    function setupInitial() {
+      return {"wheels": setupWheels(), "levers": setupLevers(), "platforms": setupPlatforms()}
+    }
+
+    function setupPlatforms() {
+      var platforms = [];
+      platforms.push(new Platform("platform1", 240, 0, images["leftPlatform.png"]));
+      platforms.push(new Platform("platform1", 240, 48, images["leftPlatform.png"]));
+      platforms.push(new Platform("platform1", 240, 96, images["leftPlatform.png"]));
+      platforms.push(new Platform("platform1", 48, 0, images["rightPlatform.png"]));
+      platforms.push(new Platform("platform1", 48, 48, images["rightPlatform.png"]));
+      platforms.push(new Platform("platform1", 48, 96, images["rightPlatform.png"]));
+      platforms.push(new Platform("platform1", 144, 0, images["downPlatform.png"]));
+      
+      return platforms;
+    }
+
+    function setupWheels() {
+      var wheels = [];
+      // where i want it + 24
+      wheels.push(new Wheel("wheel1", east, 120, 72, true, images["wheel.png"]));
+      wheels.push(new Wheel("wheel2", south, 168, 72, true, images["wheel.png"]));
+      wheels.push(new Wheel("wheel3", west, 216, 72, true, images["wheel.png"]));
+      return wheels;
+    }
+
+    function setupLevers() {
+      var levers = [];
+      levers.push(new Lever("lever1", false, 0, 0, images["leverUp.png"]));
+      levers.push(new Lever("lever2", false, 0, 48, images["leverUp.png"]));
+      levers.push(new Lever("lever3", false, 0, 96, images["leverUp.png"]));
+      return levers
+    }
+
+    function init() {
+      var canvas = document.getElementById("canvas");
+      initImages();
+      objs = setupInitial()
+      // 5 images across
+      canvas.width = 48 * 6 * scale;
+      // 3 images up
+      canvas.height = 48 * 3 * scale;
+      canvas.addEventListener("mousedown", mouseDown);
+      context = canvas.getContext("2d");
+    }
+
+    function initImages() {
+      var names = ["wheel.png", "leverDown.png", "leverUp.png", "leftPlatform.png", "rightPlatform.png", "downPlatform.png", "arrow.png"];
+      var count = names.length;
+      onload = function() { if (--count == 0) run(); };
+      for (var i = 0; i < names.length; i++) {
+        var tempImage = new Image();
+        tempImage.onload = onload;
+        tempImage.src = names[i];
+        images[names[i]] = tempImage;
+      }
+    }
+
+
+    function run() {
+      startEmitters();
+      updateArrows();
+      draw();
+    }
+
+    function startEmitters() {
+      var heights = [75, 82, 89];
+      for (var i = 0; i < heights.length; i++) {
+        var tempY = heights[i];
+        var shift = 2;
+        emitters.push(new Emitter((96 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((108 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((120 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((132 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((144 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((156 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((168 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((180 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((192 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((204 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((216 + shift) * scale, tempY * scale));
+        emitters.push(new Emitter((228 + shift) * scale, tempY * scale));
+      }
+      updateEmitters();
+    }
+
+    function updateEmitters() {
+      for (var i = 0; i < emitters.length; i++) {
+        var emitter = emitters[i];
+        for (var j = 0; j < emitter.particles.length; j++) {
+          var particle = emitter.particles[j];
+          updateParticle(particle);
+        }
+      }
+      window.requestAnimationFrame(function() {updateEmitters()})
+    }
+
+    function drawEmitters() {
+      var colors = ["#fdcf58", "#f27d0c", "#800909", "#f07f13"];
+      for (var i = 0; i < emitters.length; i++) {
+        var emitter = emitters[i];
+        for (var j = 0; j < emitter.particles.length; j++) {
+          var particle = emitter.particles[j];
+          if(particle.toRemove) {
+                emitter.particles[j] = new Particle(emitter.x, emitter.y, 20, colors[Math.floor(Math.random() * colors.length)])
+          }
+          drawParticle(particle);
+        }
+      }
+    }
+
+    function drawParticle(particle) {
+      context.fillStyle = particle.color;
+      context.globalAlpha = particle.tempLife / particle.originalLife;
+      // draw a circle centered on the particle's location, sized to the particle
+      context.beginPath();
+      // center x, center y, radius, start angle, end angle, draw counter clockwise
+      // subtract z for down add z for up
+      context.arc(particle.x - 2, particle.y - particle.z - 1, particle.radius, 0, Math.PI*2, true);
+      context.closePath();
+      context.fill();
+      context.globalAlpha = 1.0;
+    }
+
+    function updateParticle(particle) {
+      particle.time++;
+      if (particle.time > particle.originalLife) {
+        particle.toRemove = true;
+        return;
+      }
+      if (particle.time > 7500) {
+        time = 0;
+      }
+      particle.tempLife = particle.originalLife - particle.time;
+      particle.x = particle.x + particle.xa;
+      particle.y = particle.y + particle.ya;
+    }
+
+    var leverPulls = 0;
+
+    function mouseDown(e){
+      var rect = canvas.getBoundingClientRect();
+      var tempX = e.clientX - rect.left;
+      var tempY = e.clientY - rect.top;
+      if (tempX <= 48 * scale) {
+        // lever 1
+        if (tempY <= 48 * scale) {
+          leverPulls++;
+          var lever = objs["levers"][0];
+          lever.down = !lever.down;
+          var imageName = "leverUp.png";
+          if (lever.down) {
+            imageName = "leverDown.png";
+          }
+          lever.image = images[imageName];
+          objs["levers"][0] = lever;
+          if (lever.down) {
+            rotateWheels(180);
+          } else {
+            rotateWheels(-180);
+          }
+        } else if (tempY <= 96 * scale) { // lever 2
+          leverPulls++;
+          var lever = objs["levers"][1];
+          lever.down = !lever.down;
+          var imageName = "leverUp.png";
+          if (lever.down) {
+            imageName = "leverDown.png";
+          }
+          lever.image = images[imageName];
+          objs["levers"][1] = lever;
+          if (lever.down) {
+            rotateWheels(90);
+          } else {
+            rotateWheels(-90);
+          }
+        } else if (tempY <= 144 * scale) { // lever 3
+          leverPulls++;
+          var lever = objs["levers"][2];
+          lever.down = !lever.down;
+          var imageName = "leverUp.png";
+          if (lever.down) {
+            imageName = "leverDown.png";
+          }
+          lever.image = images[imageName];
+          objs["levers"][2] = lever;
+          objs["wheels"][1].rotate = !objs["wheels"][1].rotate;
+        }
+      }
+      if (leverPulls % 5 === 0) {
+        shootArrows();
+      }
+    }
+
+    function shootArrows() {
+      arrows.push(new Arrow("arrow1", 48 * 6, 30, images["arrow.png"]))
+      arrows.push(new Arrow("arrow1", 48 * 6, 45, images["arrow.png"]))
+      arrows.push(new Arrow("arrow1", 48 * 6, 60, images["arrow.png"]))
+    }
+
+    function updateArrows() {
+      for (var i = 0; i < arrows.length; i++) {
+        var arrow = arrows[i];
+        arrow.x = arrow.x - 2;
+        if (arrow.x < 40) {
+          arrows.splice(i, 1);
+        }
+      }
+      window.requestAnimationFrame(function() {updateArrows()})
+    }
+
+    function draw() {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        drawPlatforms(objs["platforms"]);
+        drawEmitters();
+        drawLevers(objs["levers"]);
+        drawWheels(objs["wheels"]);
+        drawArrows();
+        window.requestAnimationFrame(function() {draw()});
+    }
+
+    function drawArrows() {
+      for (var i = 0; i < arrows.length; i++) {
+        var arrow = arrows[i];
+        // console.log(arrow);
+        context.drawImage(arrow.image, arrow.x * scale, arrow.y * scale, 48 * scale, 48 * scale);
+      }
+    }
+
+    function drawPlatforms(platforms) {
+      for (var i = 0; i < platforms.length; i++) {
+        var platform = platforms[i];
+        context.drawImage(platform.image, platform.x * scale, platform.y * scale, 48 * scale, 48 * scale);
+      }
+    }
+
+    function drawLevers(levers) {
+      for (var i = 0; i < levers.length; i++) {
+        var lever = levers[i];
+        context.drawImage(lever.image, lever.x * scale, lever.y * scale, 48 * scale, 48 * scale);
+      }
+    }
+
+    function drawWheels(wheels) {
+      for (var i = 0; i < wheels.length; i++) {
+        var wheel = wheels[i];
+        // figure out the center of the wheels
+        context.translate(wheel.x * scale, wheel.y * scale);
+        context.rotate(wheel.angle * (Math.PI / 180));
+        // size is 48x48. go to the top left corner and then draw 48 pixels legnth and width
+        context.drawImage(wheel.image, -24 * scale, -24 * scale, 48 * scale, 48 * scale);
+        // reset back
+        context.rotate(-wheel.angle * (Math.PI/ 180));
+        context.translate(-wheel.x * scale, -wheel.y * scale);
+      }
+    }
+
+    function rotateWheels(angle) {
+      for (var i = 0; i < objs["wheels"].length; i++) {
+        var wheel = objs["wheels"][i];
+        if (wheel.rotate) {
+          var rotateNum = 2;
+          if (angle < 0) {
+            rotateNum = -2;
+          }
+          window.cancelAnimationFrame(cancels[i]);
+          wheelAngles[i] = (wheelAngles[i] + angle);
+          rotateWheel(wheel, wheelAngles[i], rotateNum, i);
+        }
+      }
+    }
+
+    function rotateWheel(wheel, angle, rotateNum, wheelNum) {
+      wheel.angle = wheel.angle + rotateNum;
+      if (wheel.angle !== angle) {
+        cancels[wheelNum] = window.requestAnimationFrame(function() {rotateWheel(wheel, angle, rotateNum, wheelNum)})
+      }
+    }
+    init();
+    </script>
+  </body>
+</html>
